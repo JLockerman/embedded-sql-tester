@@ -1,0 +1,150 @@
+running 16 tests
+
+File: ./src/main.rs
+
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct``ignored`... FAILED
+test `Test Parsing is correct``non-transactional`... FAILED
+test `Test Parsing is correct``no output`... FAILED
+test `Test Parsing is correct``end by header`... FAILED
+test `Test Parsing is correct``end by file`... FAILED
+
+File: ./src/more_sql_tests.rs
+
+test `No rows`... ok
+test `one row`... ok
+test `many rows`... ok
+test `multi col`... ok
+test `No rows`... FAILED
+test `one row`... FAILED
+test `many rows`... FAILED
+test `multi col`... FAILED
+
+Failures:
+
+File: ./src/main.rs
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "foo" does not exist
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "foo" does not exist
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "multiline" does not exist
+
+`Test Parsing is correct``ignored` failed due to error:
+db error: ERROR: relation "foo" does not exist
+
+`Test Parsing is correct``non-transactional` failed due to error:
+db error: ERROR: relation "bar" does not exist
+
+`Test Parsing is correct``no output` failed due to error:
+db error: ERROR: relation "baz" does not exist
+
+`Test Parsing is correct``end by header` failed due to error:
+db error: ERROR: relation "quz" does not exist
+
+`Test Parsing is correct``end by file` failed due to error:
+db error: ERROR: relation "qat" does not exist
+
+
+File: ./src/more_sql_tests.rs
+
+`No rows` failed with:
+
+Expected
+1
+
+(1 rows)
+Received
+---
+(0 rows)
+
+Diff
+-1+
+
+`one row` failed with:
+
+Expected
+1
+
+(1 rows)
+Received
+2
+
+(1 rows)
+
+Diff
+-1+2
+
+`many rows` failed with:
+
+Expected
+1
+4
+3
+6
+5
+
+(5 rows)
+Received
+1
+2
+3
+4
+5
+
+(5 rows)
+
+Diff
+   1
+-4+2
+   3
+-6+4
+   5
+
+`multi col` failed with:
+
+Expected
+1 | 1
+2 | 1
+3 | 1
+1 | 2
+2 | 2
+3 | 2
+1 | 3
+2 | 3
+3 | 3
+
+(9 rows)
+Received
+1 | 1
+1 | 2
+1 | 3
+2 | 1
+2 | 2
+2 | 3
+3 | 1
+3 | 2
+3 | 3
+
+(9 rows)
+
+Diff
+   1 |    1
+-2+1 | -1+2
+-3+1 | -1+3
+-1+2 | -2+1
+   2 |    2
+-3+2 | -2+3
+-1+3 | -3+1
+-2+3 | -3+2
+   3 |    3
+
+
+test result: FAILED. 4 passed; 12 failed
+
+Postmaster stderr can be found in postmaster-err-40030.log
