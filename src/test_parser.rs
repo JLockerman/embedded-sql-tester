@@ -24,7 +24,10 @@ pub fn extract_tests_from_string(s: &str) -> Vec<crate::Test> {
             } => {
                 let header = heading_stack.join("");
                 match parse_code_block_attrs(attributes) {
-                    Sql => {
+                    Sql {
+                        ignore_output,
+                        stateless,
+                    } => {
                         if let Some(mut test) = current_test.take() {
                             test.ignore_output = true;
                             tests.push(test);
@@ -34,15 +37,15 @@ pub fn extract_tests_from_string(s: &str) -> Vec<crate::Test> {
                             header,
                             text: contents,
                             output: Vec::new(),
-                            transactional: true,
-                            ignore_output: false,
+                            transactional: stateless,
+                            ignore_output,
                         };
                         current_test = Some(test)
                     }
-                    Output => {
+                    Output { ignore } => {
                         let mut test = current_test.take().unwrap_or_else(|| todo!());
                         test.output = parse_output(contents);
-                        test.ignore_output = false;
+                        test.ignore_output = ignore;
                         tests.push(test);
                     }
                     Other => continue,
@@ -58,22 +61,57 @@ pub fn extract_tests_from_string(s: &str) -> Vec<crate::Test> {
 }
 
 enum BlockKind {
-    Sql,
-    Output,
+    Sql {
+        ignore_output: bool,
+        stateless: bool,
+    },
+    Output {
+        ignore: bool,
+    },
     Other,
 }
 
 fn parse_code_block_attrs(attrs: &str) -> BlockKind {
-    let mut tokens = attrs.split(',');
-
     // TODO incomplete, look at the doctester for the full version
-    match tokens.next().unwrap().trim() {
-        "output" => return BlockKind::Output,
-        "sql" => return BlockKind::Sql,
-        "SQL" => return BlockKind::Sql,
-        // s => todo!("{}", s),
-        _ => BlockKind::Other,
+    // TODO error handling
+    let mut is_sql = false;
+    let mut is_stateful = false;
+    let mut is_ignoring_output = false;
+    let mut is_output = false;
+    let mut is_ignored = false;
+    attrs.split(',').for_each(|token| {
+        let token = &*token.trim().to_ascii_lowercase();
+        match token {
+            "output" => is_output = true,
+            "sql" => is_sql = true,
+            "ignore" => is_ignored = true,
+            "stateful" | "non-transactional" => is_stateful = true,
+            "ignore-output" => is_ignoring_output = true,
+            _ => (),
+        }
+    });
+
+    if is_ignored {
+
+        return BlockKind::Other;
     }
+
+    if is_output {
+        if is_stateful {
+            todo!()
+        }
+        return BlockKind::Output { ignore: is_ignored };
+    }
+
+    if is_sql {
+        return BlockKind::Sql {
+            ignore_output: is_ignored,
+            stateless: !is_stateful,
+        };
+    }
+
+    // TODO warn on other attributes?
+    BlockKind::Other
 }
 
 fn parse_output(s: String) -> Vec<Vec<String>> {
@@ -157,6 +195,7 @@ impl<'s> Iterator for BlockParser<'s> {
 
 #[cfg(test)]
 mod test {
+    use pretty_assertions::assert_eq;
 
     static TEST_CONTENTS: &str = r##"
 # Test Parsing
@@ -314,12 +353,7 @@ select * from qat
                 contents: "select * from qat".to_string(),
             },
         ];
-        assert!(
-            events == expected,
-            "left: {:#?}\n right: {:#?}",
-            events,
-            expected
-        );
+        assert_eq!(events, expected);
     }
 
     #[test]
@@ -345,19 +379,11 @@ select * from qat
                 ignore_output: false,
             },
             Test {
-                line: 20,
-                header: "`Test Parsing``ignored`".to_string(),
-                text: "select * from foo".to_string(),
-                output: vec![],
-                transactional: true,
-                ignore_output: true,
-            },
-            Test {
                 line: 25,
                 header: "`Test Parsing``non-transactional`".to_string(),
                 text: "select * from bar".to_string(),
                 output: vec![vec!["1".to_string(), "2".to_string()]],
-                transactional: true,
+                transactional: false,
                 ignore_output: false,
             },
             Test {
@@ -393,11 +419,6 @@ select * from qat
                 ignore_output: true,
             },
         ];
-        assert!(
-            tests == expected,
-            "left: {:#?}\n right: {:#?}",
-            tests,
-            expected
-        );
+        assert_eq!(tests, expected);
     }
 }

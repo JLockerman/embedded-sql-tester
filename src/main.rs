@@ -351,7 +351,7 @@ mod test {
         let tests = tests.expect("could not parse file");
         let expected = vec![TestFile {
             name: file!().to_string(),
-            stateless: true,
+            stateless: false,
             tests: vec![
                 Test {
                     line: 4,
@@ -378,19 +378,11 @@ mod test {
                     ignore_output: false,
                 },
                 Test {
-                    line: 20,
-                    header: "`Test Parsing is correct``ignored`".to_string(),
-                    text: "select * from foo".to_string(),
-                    output: vec![],
-                    transactional: true,
-                    ignore_output: true,
-                },
-                Test {
                     line: 25,
                     header: "`Test Parsing is correct``non-transactional`".to_string(),
                     text: "select * from bar".to_string(),
                     output: vec![vec!["1".to_string(), "2".to_string()]],
-                    transactional: true,
+                    transactional: false,
                     ignore_output: false,
                 },
                 Test {

@@ -196,8 +196,3 @@ fn print_diff(left: &[Vec<String>], right: &[Vec<String>]) {
     let _ = writeln!(&mut output);
     let _ = bufwtr.print(&output);
 }
-
-#[test]
-fn t() {
-    assert_eq!(1, 2);
-}
