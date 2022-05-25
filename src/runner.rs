@@ -341,7 +341,7 @@ impl<'a> Drop for TestsEnv<'a> {
         let copy_output_locally = || {
             use std::fs::rename;
 
-            let out_file = format!("postmaster-out-{}.log", pid);
+            let out_file = format!("postmaster-out.log");
             match rename(&self.out_path, &out_file) {
                 Ok(_) => ecprintln!("Postmaster stdout" bold blue, " can be found in {out_file}"),
                 Err(err) => cprintln!(
@@ -350,7 +350,7 @@ impl<'a> Drop for TestsEnv<'a> {
                 ),
             };
 
-            let err_file = format!("postmaster-err-{}.log", pid);
+            let err_file = format!("postmaster-err.log");
             let _ = std::fs::rename(&self.err_path, &err_file).map_err(|err| {
                 ecprintln!(
                     "Error" bold red,
