@@ -7,8 +7,8 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use clap::Parser;
 
-mod test_parser;
-mod test_runner;
+mod parser;
+mod runner;
 mod colors;
 mod db_output;
 
@@ -57,7 +57,8 @@ async fn main_with_args(args: &Args) -> Result<()> {
             .collect();
         bail!("{errors}");
     }
-    test_runner::run(&args, tests.into_iter().map(|t| t.unwrap())).await?;
+
+    runner::run(&args, tests.into_iter().map(|t| t.unwrap())).await?;
     // let tests = parsed;
     // dbg!(tests);
     Ok(())
@@ -119,7 +120,7 @@ fn extract_all_tests_from_file(
     path: &str,
     contents: &str,
 ) -> Result<TestFile> {
-    let tests = test_parser::extract_tests_from_string(contents);
+    let tests = parser::extract_tests_from_string(contents);
     let stateless = tests.iter().all(|t| t.transactional);
     let file = TestFile {
         name: path.to_string(),
@@ -141,14 +142,12 @@ fn extract_marked_tests_from_file(
     let test_blocks = find_marked_tests_blocks(contents, start_marker, end_marker)
         .with_context(|| format!("failed to read tests from `{}`", path))?;
     for (_, test_block) in test_blocks {
-        let mut test = test_parser::extract_tests_from_string(test_block);
+        let mut test = parser::extract_tests_from_string(test_block);
         for t in &mut test {
             stateless &= t.transactional;
             t.line += 0; // TODO fixup based on where blocks start
         }
-        if !test.is_empty() {
-            tests.extend(test);
-        }
+        tests.extend(test);
     }
     let file = TestFile {
         name: path.to_string(),
