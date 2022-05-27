@@ -1,20 +1,10 @@
-running 18 tests
+running 17 tests
+Stateless tests
 
 File: ./Readme.md
 
 test `Embedded SQL Test Runner`... ok
 test `Embedded SQL Test Runner`... ok
-
-File: ./src/main.rs
-
-test `Test Parsing is correct`... FAILED
-test `Test Parsing is correct`... FAILED
-test `Test Parsing is correct`... FAILED
-test `Test Parsing is correct``ignored`... FAILED
-test `Test Parsing is correct``non-transactional`... FAILED
-test `Test Parsing is correct``no output`... FAILED
-test `Test Parsing is correct``end by header`... FAILED
-test `Test Parsing is correct``end by file`... FAILED
 
 File: ./src/more_sql_tests.rs
 
@@ -27,34 +17,19 @@ test `one row`... FAILED
 test `many rows`... FAILED
 test `multi col`... FAILED
 
-Failures:
+Stateful tests
 
 File: ./src/main.rs
 
-`Test Parsing is correct` failed due to error:
-db error: ERROR: relation "foo" does not exist
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct`... FAILED
+test `Test Parsing is correct``non-transactional`... FAILED
+test `Test Parsing is correct``no output`... FAILED
+test `Test Parsing is correct``end by header`... FAILED
+test `Test Parsing is correct``end by file`... FAILED
 
-`Test Parsing is correct` failed due to error:
-db error: ERROR: relation "foo" does not exist
-
-`Test Parsing is correct` failed due to error:
-db error: ERROR: relation "multiline" does not exist
-
-`Test Parsing is correct``ignored` failed due to error:
-db error: ERROR: relation "foo" does not exist
-
-`Test Parsing is correct``non-transactional` failed due to error:
-db error: ERROR: relation "bar" does not exist
-
-`Test Parsing is correct``no output` failed due to error:
-db error: ERROR: relation "baz" does not exist
-
-`Test Parsing is correct``end by header` failed due to error:
-db error: ERROR: relation "quz" does not exist
-
-`Test Parsing is correct``end by file` failed due to error:
-db error: ERROR: relation "qat" does not exist
-
+Failures:
 
 File: ./src/more_sql_tests.rs
 
@@ -150,5 +125,29 @@ Diff
    3 |    3
 
 
-test result: FAILED. 6 passed; 12 failed
+File: ./src/main.rs
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "foo" does not exist
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "foo" does not exist
+
+`Test Parsing is correct` failed due to error:
+db error: ERROR: relation "multiline" does not exist
+
+`Test Parsing is correct``non-transactional` failed due to error:
+db error: ERROR: relation "bar" does not exist
+
+`Test Parsing is correct``no output` failed due to error:
+db error: ERROR: relation "baz" does not exist
+
+`Test Parsing is correct``end by header` failed due to error:
+db error: ERROR: relation "quz" does not exist
+
+`Test Parsing is correct``end by file` failed due to error:
+db error: ERROR: relation "qat" does not exist
+
+
+test result: FAILED. 6 passed; 11 failed
 

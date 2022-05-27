@@ -110,13 +110,29 @@ pub(crate) async fn run(args: &Args, tests: impl Iterator<Item = TestFile>) -> R
     let (stateless_tests, stateful_tests): (Vec<_>, Vec<_>) =
         tests.partition(|tests| tests.stateless);
 
-    let (num_tests, failures) = tester.run_stateless_tests(stateless_tests).await?;
+    let t1: usize = stateless_tests.iter().map(|file| file.tests.len()).sum();
+    let t2: usize = stateful_tests.iter().map(|file| file.tests.len()).sum();
+    let num_tests = t1 + t2;
+    println!("running {num_tests} tests");
 
-    // let stateful_results = run_stateful_tests(stateless)?;
+    let failures1 = tester.run_stateless_tests(stateless_tests).await?;
+    let failures2 = tester.run_stateful_tests(stateful_tests).await?;
 
-    let num_failed = failures.len();
+    if !failures1.is_empty() || !failures2.is_empty() {
+        cprintln!("\n", "Failures" bold blue, ":");
+        let mut current_file = "";
+        for (file_name, test, failure) in failures1.iter().chain(failures2.iter()) {
+            if file_name != current_file {
+                current_file = file_name;
+                cprintln!("\n", "File" bold blue, ": {current_file}\n");
+            }
+            failure.print(test)
+        }
+    }
+
+    let num_failed = failures1.len() + failures2.len();
     let num_passed = num_tests - num_failed;
-    if failures.is_empty() {
+    if failures1.is_empty() && failures2.is_empty() {
         cprintln!("\ntest result: ", "ok" green, ". {num_passed} passed; {num_failed} failed\n");
         // TODO timing
     } else {
@@ -207,24 +223,13 @@ impl<'a> TestsEnv<'a> {
     async fn run_stateless_tests(
         &self,
         tests: Vec<TestFile>,
-    ) -> Result<(usize, Vec<(String, Test, FailureInfo)>)> {
+    ) -> Result<Vec<(String, Test, FailureInfo)>> {
         use tokio::sync::{mpsc, oneshot};
-        let TestsEnv {
-            sh, bindir, port, ..
-        } = self;
+        let TestsEnv { port, .. } = self;
 
-        let createdb = path!(bindir / "createdb");
-        let dbname = format!("stateless_test_db");
-        cmd!(sh, "{createdb} -p {port} {dbname}").quiet().run()?;
+        cprintln!("Stateless tests" bold blue);
 
-        let psql = path!(bindir / "psql");
-        let create_role = "CREATE ROLE postgres WITH LOGIN;";
-        // TODO print output only on error
-        cmd!(sh, "{psql} -X -p {port} -c {create_role} {dbname}")
-            .quiet()
-            .ignore_stdout()
-            .ignore_stderr()
-            .run()?;
+        let db = self.createdb(format!("stateless_test_db"))?;
 
         // TODO make size user-configurable
         let (unused_clients, mut clients) = mpsc::channel(4);
@@ -232,7 +237,7 @@ impl<'a> TestsEnv<'a> {
         let mut conns: FuturesOrdered<_> = (0..4)
             .map(|_| async {
                 tokio_postgres::connect(
-                    &format!("host=localhost port={port} user=postgres application_name=tests"),
+                    &format!("host=localhost port={port} user=postgres dbname=stateless_test_db application_name=tests"),
                     tokio_postgres::NoTls,
                 )
                 .await
@@ -243,14 +248,13 @@ impl<'a> TestsEnv<'a> {
             let (client, connection) = conn?;
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
-                    cprintln!("Error" bold red, "{e} in postgres connection");
+                    cprintln!("Error" bold red, " in postgres connection: {e}");
                 }
             });
             unused_clients.try_send(client)?;
         }
 
         let num_tests: usize = tests.iter().map(|file| file.tests.len()).sum();
-        println!("running {} tests", num_tests);
 
         let mut results = Vec::with_capacity(num_tests);
         let mut tests = tests.into_iter().flat_map(|file| {
@@ -294,38 +298,158 @@ impl<'a> TestsEnv<'a> {
                 cprintln!("\n", "File" bold blue, ": {current_file}\n");
             }
 
-            let header = &test.header;
-            match result {
-                Err(e) => {
-                    cprintln!("test {header}... ", "FAILED" bold red);
-                    failures.push((file_name, test, QueryError(e)))
+            print_test_result(file_name, test, result, &mut failures);
+        }
+
+        drop(unused_clients);
+        drop(clients);
+
+        db.drop()?;
+
+        Ok(failures)
+    }
+
+    async fn run_stateful_tests(
+        &self,
+        tests: Vec<TestFile>,
+    ) -> Result<Vec<(String, Test, FailureInfo)>> {
+        let TestsEnv { port, .. } = self;
+
+        cprintln!("\nStateful tests" bold blue);
+
+        let mut running_tests = FuturesOrdered::new();
+        let mut files = tests.into_iter().rev();
+
+        let test_runner = |test_file: TestFile, db_num: usize| async move {
+            let dbname = format!("stateful-tests-{db_num}");
+            let db = self.createdb(dbname)?;
+            let dbname = &*db;
+            let (mut client, connection) = tokio_postgres::connect(
+                &format!("host=localhost port={port} user=postgres dbname={dbname} application_name=tests"),
+                tokio_postgres::NoTls,
+            )
+            .await?;
+
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    cprintln!("Error" bold red, " in postgres connection: {e}");
                 }
-                Ok(query_result) => {
-                    print!("test {header}... ");
-                    match validate_output(query_result, &test) {
-                        db_output::TestResult::Passed => cprintln!("ok" green),
-                        db_output::TestResult::Failed(failure) => {
-                            failures.push((file_name, test, failure));
-                            cprintln!("FAILED" bold red)
-                        }
+            });
+
+            let mut results = Vec::with_capacity(test_file.tests.len());
+
+            for test in test_file.tests {
+                let result = if test.transactional {
+                    let txn = client.transaction().await?;
+                    let result = txn.simple_query(&test.text).await;
+                    let _ = txn.rollback().await;
+                    result
+                } else {
+                    // TODO if a stateful test fails to probably invalidates future tests
+                    //      abort here and mark them as skipped somehow?
+                    client.simple_query(&test.text).await
+                };
+                results.push((test, result));
+            }
+
+            drop(client);
+            // TODO do something on error?
+            let _ = db.drop();
+            Ok::<_, anyhow::Error>((test_file.name, results))
+        };
+
+        // TODO make size user-configurable
+        // TODO max client
+        let mut i = 0;
+        for file in (&mut files).take(4) {
+            i += 1;
+            running_tests.push(test_runner(file, i))
+        }
+
+        let mut failures = vec![];
+
+        loop {
+            let result = (&mut running_tests).next().await;
+            if let Some(results) = result {
+                for result in results {
+                    let (current_file, result) = result;
+                    cprintln!("\n", "File" bold blue, ": {current_file}\n");
+                    for (test, result) in result {
+                        print_test_result(current_file.clone(), test, result, &mut failures);
+                    }
+                }
+            }
+            match (&mut files).next() {
+                Some(file) => {
+                    i += 1;
+                    running_tests.push(test_runner(file, i))
+                }
+                None => {
+                    if running_tests.is_empty() {
+                        break;
                     }
                 }
             }
         }
 
-        if !failures.is_empty() {
-            cprintln!("\n", "Failures" bold blue, ":");
-            let mut current_file = "";
-            for (file_name, test, failure) in &failures {
-                if file_name != current_file {
-                    current_file = file_name;
-                    cprintln!("\n", "File" bold blue, ": {current_file}\n");
+        Ok(failures)
+    }
+
+    fn createdb(&self, dbname: String) -> Result<DbDropper> {
+        use once_cell::sync::OnceCell;
+
+        let Self { bindir, port, .. } = self;
+
+        let sh = Shell::new()?;
+
+        let createdb = path!(bindir / "createdb");
+        cmd!(sh, "{createdb} -p {port} {dbname}").quiet().run()?;
+
+        let psql = path!(bindir / "psql");
+
+        static CREATE_ROLE_ONCE: OnceCell<()> = OnceCell::new();
+
+        CREATE_ROLE_ONCE.get_or_try_init(|| {
+            let create_role = "CREATE ROLE postgres WITH LOGIN;";
+            // TODO print output only on error
+            cmd!(sh, "{psql} -X -p {port} -c {create_role} {dbname}")
+                .quiet()
+                .ignore_stdout()
+                .ignore_stderr()
+                .run()
+        })?;
+
+        Ok(DbDropper {
+            dbname,
+            sh,
+            bindir: bindir.to_string(),
+            port: port.to_string(),
+        })
+    }
+}
+
+fn print_test_result(
+    file_name: String,
+    test: Test,
+    result: Result<Vec<tokio_postgres::SimpleQueryMessage>, tokio_postgres::Error>,
+    failures: &mut Vec<(String, Test, FailureInfo)>,
+) {
+    let header = &test.header;
+    match result {
+        Err(e) => {
+            cprintln!("test {header}... ", "FAILED" bold red);
+            failures.push((file_name, test, QueryError(e)))
+        }
+        Ok(query_result) => {
+            print!("test {header}... ");
+            match validate_output(query_result, &test) {
+                db_output::TestResult::Passed => cprintln!("ok" green),
+                db_output::TestResult::Failed(failure) => {
+                    failures.push((file_name, test, failure));
+                    cprintln!("FAILED" bold red)
                 }
-                failure.print(test)
             }
         }
-
-        Ok((num_tests, failures))
     }
 }
 
@@ -346,7 +470,7 @@ impl<'a> Drop for TestsEnv<'a> {
                 Ok(_) => ecprintln!("Postmaster stdout" bold blue, " can be found in {out_file}"),
                 Err(err) => cprintln!(
                     "Error" bold red,
-                    " could copy postmaster stdout from `postmaster-stdout.temp.log` due to {err}"
+                    " could not copy postmaster stdout from `postmaster-stdout.temp.log` due to {err}"
                 ),
             };
 
@@ -354,7 +478,7 @@ impl<'a> Drop for TestsEnv<'a> {
             let _ = std::fs::rename(&self.err_path, &err_file).map_err(|err| {
                 ecprintln!(
                     "Error" bold red,
-                    " could copy postmaster stderr from `postmaster-stderr.temp.log` due to {err}"
+                    " could not copy postmaster stderr from `postmaster-stderr.temp.log` due to {err}"
                 )
             });
             ecprintln!("Postmaster stderr" bold blue, " can be found in {err_file}");
@@ -398,10 +522,32 @@ impl<'a> Drop for TestsEnv<'a> {
     }
 }
 
-struct Deferred<T: FnMut()>(T);
+#[must_use]
+struct DbDropper {
+    dbname: String,
+    sh: Shell,
+    bindir: String,
+    port: String,
+}
 
-impl<T: FnMut()> Drop for Deferred<T> {
-    fn drop(&mut self) {
-        self.0()
+impl DbDropper {
+    fn drop(self) -> Result<()> {
+        let DbDropper {
+            dbname,
+            sh,
+            bindir,
+            port,
+        } = self;
+        let dropdb = path!(bindir / "dropdb");
+        cmd!(sh, "{dropdb} -f -p {port} {dbname}").quiet().run()?;
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for DbDropper {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dbname
     }
 }
